@@ -11,6 +11,7 @@ import android.hardware.Camera;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.SystemClock;
@@ -22,6 +23,8 @@ import android.view.ViewGroup;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -39,7 +42,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private static final int DESIRED_PREVIEW_HEIGHT = 1080;
     private static final int NN_INPUT_SIZE = 227;
     private static final int BUFFER_SIZE = 2;
-    private static final int BlUR_THRESHHOLD = 85;
+    private static final int BlUR_THRESHHOLD = 5000;
+    private static final int START_HOUR = 8;
+    private static final int END_HOUR = 18;
 
     private Camera mCamera;
     private byte[] cameraBuffer = null;
@@ -71,7 +76,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private int[] yBytes = null;
     private byte[] yuvCopy = null;
     private int[] yCopy = null;
-    private int[] rgbBuffer = null;
     private Bitmap originBitmap = null;
     private Bitmap croppedBitmap = Bitmap.createBitmap(NN_INPUT_SIZE, NN_INPUT_SIZE, Bitmap.Config.ARGB_8888);
     private LinkedBlockingQueue<int[]> yBuffer = new LinkedBlockingQueue<>(BUFFER_SIZE);
@@ -85,16 +89,24 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private float[] results = null;
     private List<DetectObject> objects = new ArrayList<>();
     private float minimumConfidence = 0.5f;
-    private long detectTime;
     private float blurSTD;
 
     //
     private boolean isProcessingFrame = false;
     private boolean isComputingDetection = false;
+    private boolean isDay;
+    private boolean hasNetwork;
 
     //debug
-    private long yTime;
+    //debug
+    private long detectStartTime;
+    private long detectTime;
+
+    private long convertTime;
     private long lapTime;
+
+    private String path = Environment.getExternalStorageDirectory().toString();
+    private File file;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,7 +136,11 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         // 后视镜的摄像头捕获图像尺寸未找到手动调整的办法，只能使用默认分辨率1080*1920，
         // 所以bytes大小为1080*1920*1.5，解析的时候必须按照该尺寸
 
-        if (isProcessingFrame) {
+        isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
+        hasNetwork = Util.isNetworkAvailable(this);
+
+        if (isProcessingFrame || !isDay || !hasNetwork) {
+            mCamera.addCallbackBuffer(bytes);
             Log.e(TAG, "Dropping frame!");
             return;
         }
@@ -146,9 +162,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             @Override
             public void run() {
                 long startTime = SystemClock.uptimeMillis();
-                //System.arraycopy(bytes, 0, yuvBytes, 0, bytes.length);
+                System.arraycopy(bytes, 0, yuvBytes, 0, bytes.length);
                 Util.convertYUV420SPToY888(bytes, cameraSize.width, cameraSize.height, yBytes);
-                yTime = SystemClock.uptimeMillis() - startTime;
+                convertTime = SystemClock.uptimeMillis() - startTime;
             }
         };
 
@@ -159,7 +175,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                 long startTime = SystemClock.uptimeMillis();
                 boolean isUseful = judgeImage();
                 lapTime = SystemClock.uptimeMillis() - startTime;
-                if (yBuffer.remainingCapacity() > 0) {
+                if (yBuffer.remainingCapacity() > 0 && isUseful) {
                     try {
                         yuvBuffer.put(yuvBytes);
                         yBuffer.put(yBytes);
@@ -173,7 +189,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         imagePoster = new Runnable() {
             @Override
             public void run() {
-                Util.convertYUV420SPToARGB8888(yuvCopy, cameraSize.width, cameraSize.height, rgbBuffer);
             }
         };
 
@@ -190,6 +205,14 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
 
     protected void processImage() {
         readyForNextImage();
+
+        if (isComputingDetection) {
+            if(SystemClock.uptimeMillis() - detectStartTime > 1000)
+                isComputingDetection = false;
+            return;
+        }
+        isComputingDetection = true;
+
         convertImage();
 
         if (!yBuffer.isEmpty()) {
@@ -203,19 +226,33 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             return;
         }
 
-        if (isComputingDetection) {
-            return;
-        }
-        isComputingDetection = true;
-
         originBitmap.setPixels(yCopy, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
         croppedBitmap = Bitmap.createScaledBitmap(originBitmap, 227, 227, false);
+
+        /*ByteArrayOutputStream outTemp = new ByteArrayOutputStream();
+        YuvImage yuv = new YuvImage(yuvCopy, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
+        yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 100, outTemp);
+        byte[] jpegBytes = outTemp.toByteArray();
+        Bitmap image = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
+        File file = new File(path, "yuv.jpg");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            image.compress(Bitmap.CompressFormat.JPEG, 100, out);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }*/
+
+        /*file = new File(path, "gray.jpg");
+        try (FileOutputStream out = new FileOutputStream(file)) {
+            originBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }*/
 
         runInBackground(
                 new Runnable() {
                     @Override
                     public void run() {
-                        long detectStartTime = SystemClock.uptimeMillis();
+                        detectStartTime = SystemClock.uptimeMillis();
                         results = mobileNetssd.Detect(croppedBitmap);
                         detectTime = SystemClock.uptimeMillis() - detectStartTime;
                         objects.clear();
@@ -242,7 +279,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                             }
                         }
                         int remain = yBuffer.remainingCapacity();
-                        mOverlayView.drawResults(objects, detectTime, remain, blurSTD, yTime, lapTime);
+                        mOverlayView.drawResults(objects, detectTime, remain, blurSTD, convertTime, lapTime);
                         mOverlayView.postInvalidate();
                         isComputingDetection = false;
                     }
@@ -410,14 +447,14 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         byte[] words = null;
 
         {
-            InputStream assetsInputStream = getAssets().open("MobileNetSSD_deploy.param.bin");
+            InputStream assetsInputStream = getAssets().open("mobilessd_int8.param.bin");
             int available = assetsInputStream.available();
             param = new byte[available];
             int byteCode = assetsInputStream.read(param);
             assetsInputStream.close();
         }
         {
-            InputStream assetsInputStream = getAssets().open("MobileNetSSD_deploy.bin");
+            InputStream assetsInputStream = getAssets().open("mobilessd_int8.bin");
             int available = assetsInputStream.available();
             bin = new byte[available];
             int byteCode = assetsInputStream.read(bin);
