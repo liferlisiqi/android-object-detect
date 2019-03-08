@@ -9,7 +9,7 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
-        ndk{
+        ndk {
             moduleName "ncnn"
             abiFilters "arm64-v8a", "armeabi-v7a"
         }
@@ -34,8 +34,15 @@ dependencies {
     implementation 'jp.co.cyberagent.android:gpuimage:2.0.3'
     implementation 'com.android.support:support-annotations:28.0.0'
     implementation project(':openCVLibrary343')
+
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.1.0'
     implementation 'org.eclipse.paho:org.eclipse.paho.android.service:1.1.0'
+
+    //implementation 'com.github.delight-im:Android-SimpleLocation:v1.1.0'
+
+    //implementation 'com.google.android.gms:play-services:9.2.0'
+    implementation 'com.google.android.gms:play-services-location:16.0.0'
+
     testImplementation 'junit:junit:4.12'
     androidTestImplementation 'com.android.support.test:runner:1.0.2'
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'

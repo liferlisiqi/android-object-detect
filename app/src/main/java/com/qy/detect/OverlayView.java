@@ -30,7 +30,9 @@ public class OverlayView extends View {
     private int mRemainBuffer;
     private double mBlurDev;
     private double mYtime;
-    private double mlapTime;
+    private double mLapTime;
+    private String mLatitude;
+    private String mLongitude;
 
     private DecimalFormat decimalFormat = new DecimalFormat(".00");
 
@@ -58,13 +60,15 @@ public class OverlayView extends View {
     }
 
     public void drawResults(List<DetectObject> results, long detectTime, int remainBuffer,
-                            double blurDEV, double yTime, double lapTime) {
+                            double blurDEV, double yTime, double lapTime, String latitude, String longitude) {
         mResults = results;
         mDetectTime = detectTime;
         mRemainBuffer = remainBuffer;
         mBlurDev = blurDEV;
         mYtime = yTime;
-        mlapTime = lapTime;
+        mLapTime = lapTime;
+        mLatitude = latitude;
+        mLongitude = longitude;
     }
 
     public void setOrientation(int orientation) {
@@ -87,7 +91,9 @@ public class OverlayView extends View {
         canvas.drawText("blur dev:" + decimalFormat.format(mBlurDev),300, 30, mTextPaint);
         canvas.drawText("remain buffer:" + mRemainBuffer,600, 30, mTextPaint);
         canvas.drawText("yuv2y time:" + mYtime,0, 60, mTextPaint);
-        canvas.drawText("laplace time:" + mlapTime,300, 60, mTextPaint);
+        canvas.drawText("laplace time:" + mLapTime,300, 60, mTextPaint);
+        canvas.drawText("latitude:" + mLatitude,0, 90, mTextPaint);
+        canvas.drawText("longitude:" + mLongitude,300, 90, mTextPaint);
 
         if (!mResults.isEmpty()) {
             Matrix matrix = new Matrix();

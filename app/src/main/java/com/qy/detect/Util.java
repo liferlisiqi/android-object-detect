@@ -15,13 +15,17 @@ import android.util.Log;
 import android.view.OrientationEventListener;
 import android.view.Surface;
 
+import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Date;
 
 import jp.co.cyberagent.android.gpuimage.GPUImageNativeLibrary;
+import jp.co.cyberagent.android.gpuimage.filter.GPUImageLaplacianFilter;
 
 /**
  * This class uses Utility functions written for the Camera module of Android.
@@ -45,6 +49,8 @@ public class Util {
     private static final int ORIENTATION_HYSTERESIS = 5;
     private static final int MINIMUM_PREVIEW_SIZE = 240;
     private static Calendar mCalendar=Calendar.getInstance();
+    private static SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss");
+
 
 
     /**
@@ -63,6 +69,7 @@ public class Util {
             case Surface.ROTATION_270: return 270;
         }
         return 0;
+
     }
 
     public static int getDisplayOrientation(int degrees, int cameraId) {
@@ -242,8 +249,14 @@ public class Util {
             y3 = data[width+i  ]&0xff;
             y4 = data[width+i+1]&0xff;
 
+            //NV21
+            u = data[offset+k]&0xff;
+            v = data[offset+k+1]&0xff;
+
+            //NV12
             u = data[offset+k+1]&0xff;
             v = data[offset+k]&0xff;
+
             u = u-128;
             v = v-128;
 
@@ -255,8 +268,36 @@ public class Util {
             if (i!=0 && (i+2)%width==0)
                 i+=width;
         }
+    }
 
-        //return pixels;
+    public static void convertYUV420_YV12toRGB8888(byte [] data, int width, int height, int[] pixels) {
+        int size = width*height;
+        int offset = size;
+        //int[] pixels = new int[size];s
+        int u, v, y1, y2, y3, y4;
+
+        // i percorre os Y and the final pixels
+        // k percorre os pixles U e V
+        for(int i=0, k=0; i < size; i+=2, k++) {
+            y1 = data[i  ]&0xff;
+            y2 = data[i+1]&0xff;
+            y3 = data[width+i  ]&0xff;
+            y4 = data[width+i+1]&0xff;
+
+            u = data[offset+k+size/4]&0xff;
+            v = data[offset+k]&0xff;
+
+            u = u-128;
+            v = v-128;
+
+            pixels[i  ] = convertYUVtoRGB(y1, u, v);
+            pixels[i+1] = convertYUVtoRGB(y2, u, v);
+            pixels[width+i  ] = convertYUVtoRGB(y3, u, v);
+            pixels[width+i+1] = convertYUVtoRGB(y4, u, v);
+
+            if (i!=0 && (i+2)%width==0)
+                i+=width;
+        }
     }
 
     private static int convertYUVtoRGB(int y, int u, int v) {
@@ -276,6 +317,11 @@ public class Util {
 
         mCalendar.setTimeInMillis(tTime);
         return mCalendar.get(Calendar.HOUR_OF_DAY);
+    }
+
+    public static String getTime(){
+        java.util.Date date = new java.util.Date();
+        return formatter.format(date);
     }
 
 
