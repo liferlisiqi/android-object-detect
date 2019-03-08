@@ -3,17 +3,16 @@ package com.qy.detect;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.hardware.SensorManager;
-import android.location.Criteria;
 import android.location.LocationListener;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,6 +22,7 @@ import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -36,7 +36,6 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -64,7 +63,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
 
     private Camera mCamera;
     private byte[] cameraBuffer = null;
-    private DecimalFormat decimalFormat = new DecimalFormat(".000000");
+    Camera.Size cameraSize = null;
+    private DecimalFormat gpsFormat = new DecimalFormat(".000000");
 
     // We need the phone orientation to correctly draw the overlay:
     private int mOrientation;
@@ -78,7 +78,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     // The surface view for the camera data
     private SurfaceView mSurfaceView;
     private OverlayView mOverlayView;
-    Camera.Size cameraSize = null;
+
 
     //
     private Runnable postInferenceCallback;
@@ -122,6 +122,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private double latitude;
     private double longitude;
     private JSONObject jsonObject = new JSONObject();
+    byte[] nv21Bytes;
+    byte[] nv21CompressBytes;
+    ByteArrayOutputStream nv21Stream = new ByteArrayOutputStream();
 
     //
     LocationManager locationManager;
@@ -136,13 +139,15 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private int[] rgb;
     private String path = Environment.getExternalStorageDirectory().toString();
     private File file;
-    private YUVConvert yuvConvert;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         mSurfaceView = new SurfaceView(this);
         setContentView(mSurfaceView);
+
+        Intent keepLiveIntent = new Intent(this, KeepLiveService.class);
+        startService(keepLiveIntent);
 
         requestPermission();
 
@@ -152,13 +157,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             return;
         }
         locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,0, 0, this);
-        locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,0, 0, this);
-
 
         mqttHelper = new MqttHelper();
         mqttHelper.init();
-
-        yuvConvert = new YUVConvert(this);
 
         mOverlayView = new OverlayView(this);
         addContentView(mOverlayView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -183,8 +184,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
         hasNetwork = Util.isNetworkAvailable(this);
 
-        //getLocation();
-        //
         if (isProcessingFrame || !isDay || !hasNetwork) {
             mCamera.addCallbackBuffer(bytes);
             Log.e(TAG, "Dropping frame!");
@@ -238,16 +237,22 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             public void run() {
                 if(hasNetwork){
                     try{
-                        /*jsonObject.put("SN", SN);
-                        jsonObject.put("image", new String(yuvBytes, StandardCharsets.UTF_8));
+                        if(nv21Bytes == null)
+                            nv21Bytes = new byte[yuvCopy.length];
+                        /*Util.YV12toNV21(yuvCopy, nv21Bytes, cameraSize.width, cameraSize.height);
+                        YuvImage yuv = new YuvImage(nv21Bytes, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
+                        yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 50, nv21Stream);
+                        byte[] nv21CompressBytes = nv21Stream.toByteArray();
+                        jsonObject.put("SN", SN);
+                        jsonObject.put("image", new String(nv21CompressBytes, StandardCharsets.UTF_8));
                         jsonObject.put("results", resultStr);
                         jsonObject.put("time", time);*/
                         jsonObject.put("location", latitude + "_" + longitude);
                     }catch (Exception e) {
                         e.printStackTrace();
                     }
-                    String str = jsonObject.toString();
-                    mqttHelper.publish(jsonObject.toString(), false, 2);
+                    String jsonStr = jsonObject.toString();
+                    mqttHelper.publish(jsonStr, false, 2);
                 }
             }
         };
@@ -288,48 +293,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
 
         originBitmap.setPixels(yCopy, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
         croppedBitmap = Bitmap.createScaledBitmap(originBitmap, 227, 227, false);
-
-        /*Util.convertYUV420_YV12toRGB8888(yuvCopy, cameraSize.width, cameraSize.height, rgb);
-        rgbBitmap.setPixels(rgb, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
-        file = new File(path, "rgb.jpg");
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            originBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }*/
-
-        /*Bitmap bmp = yuvConvert.nv21ToBitmap(yuvCopy, cameraSize.width, cameraSize.height);
-        File file = new File(path, "rgb.jpg");
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            bmp.compress(Bitmap.CompressFormat.JPEG, 100, out);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }*/
-
-        /*ByteArrayOutputStream outTemp = new ByteArrayOutputStream();
-        byte[] nv21 = new byte[yuvCopy.length];
-        YV12toNV21(yuvCopy, nv21, cameraSize.width, cameraSize.height);
-        YuvImage yuv = new YuvImage(nv21, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
-        yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 100, outTemp);
-        byte[] jpegBytes = outTemp.toByteArray();
-        Bitmap image = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.length);
-        File file = new File(path, "yuv.jpg");
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            image.compress(Bitmap.CompressFormat.JPEG, 100, out);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }*/
-
-        /*FileOutputStream fileOutputStream = new FileOutputStream(file);
-        bmp.compress(Bitmap.CompressFormat.JPEG, 100, fileOutputStream);*/
-
-
-        /*file = new File(path, "gray.jpg");
-        try (FileOutputStream out = new FileOutputStream(file)) {
-            originBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }*/
 
         runInBackground(
                 new Runnable() {
@@ -375,7 +338,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                         int remain = yBuffer.remainingCapacity();
                         mOverlayView.drawResults(objects, detectTime, remain, blurSTD,
                                 convertTime, lapTime,
-                                decimalFormat.format(latitude), decimalFormat.format(longitude));
+                                gpsFormat.format(latitude), gpsFormat.format(longitude));
                         mOverlayView.postInvalidate();
                         isComputingDetection = false;
                     }
@@ -406,8 +369,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             handlerThread.join();
             handlerThread = null;
             handler = null;
-        } catch (final InterruptedException e) {sdfsdfd
-
+        } catch (final InterruptedException e) {
             Log.e(TAG, "Exception!");
         }
         super.onPause();
@@ -469,6 +431,14 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    @Override
+    public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
+        mCamera.setPreviewCallback(null);
+        mCamera.setErrorCallback(null);
+        mCamera.release();
+        mCamera = null;
+    }
+
     private void setDisplayOrientation() {
         // Now set the display orientation:
         mDisplayRotation = Util.getDisplayRotation(CameraActivity.this);
@@ -477,8 +447,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         mCamera.setDisplayOrientation(mDisplayOrientation);
 
         if (mOverlayView != null) {
-            mOverlayView.setDisplayOrientation(mDisplayOrientation);
-            //mOverlayView.setDisplayOrientation(90);
+            //mOverlayView.setDisplayOrientation(mDisplayOrientation);
+            mOverlayView.setDisplayOrientation(90);
         }
     }
 
@@ -490,14 +460,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
         parameters.setPreviewFormat(ImageFormat.NV21);
         mCamera.setParameters(parameters);
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
-        mCamera.setPreviewCallback(null);
-        mCamera.setErrorCallback(null);
-        mCamera.release();
-        mCamera = null;
     }
 
     private class SimpleOrientationEventListener extends OrientationEventListener {
@@ -607,40 +569,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         grayBmp.setPixels(yBytes, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
         blurSTD = OpencvHelper.Laplace(grayBmp);
         return blurSTD > BlUR_THRESHHOLD;
-    }
-
-    /*public void getLocation() {
-        // Get the location manager
-        LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-        Criteria criteria = new Criteria();
-        String bestProvider = locationManager.getBestProvider(criteria, false);
-        //bestProvider =
-
-        if (ActivityCompat.checkSelfPermission(this, PERMISSION_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, PERMISSION_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        Location location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
-        try {
-            latitude = location.getLatitude ();
-            longitude = location.getLongitude ();
-        }
-        catch (NullPointerException e){
-            e.printStackTrace();
-        }
-    }*/
-
-    private void YV12toNV21(final byte[] input, final byte[] output, final int width, final int height) {
-        final int frameSize = width * height;
-        final int qFrameSize = frameSize / 4;
-        final int tempFrameSize = frameSize * 5 / 4;
-
-        System.arraycopy(input, 0, output, 0, frameSize); // Y
-
-        for (int i = 0; i < qFrameSize; i++) {
-            output[frameSize + i * 2] = input[frameSize + i]; // Cb (U)
-            output[frameSize + i * 2 + 1] = input[tempFrameSize + i]; // Cr (V)
-        }
     }
 
     @Override

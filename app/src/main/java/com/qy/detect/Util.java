@@ -311,6 +311,16 @@ public class Util {
         return 0xff000000 | (b<<16) | (g<<8) | r;
     }
 
+    public static void YV12toNV21(final byte[] input, final byte[] output, final int width, final int height) {
+        final int frameSize = width * height;
+        final int qFrameSize = frameSize / 4;
+        final int tempFrameSize = frameSize * 5 / 4;
+        System.arraycopy(input, 0, output, 0, frameSize); // Y
+        for (int i = 0; i < qFrameSize; i++) {
+            output[frameSize + i * 2] = input[frameSize + i]; // Cb (U)
+            output[frameSize + i * 2 + 1] = input[tempFrameSize + i]; // Cr (V)
+        }
+    }
 
     public static int getHour(){
         long tTime = System.currentTimeMillis();
