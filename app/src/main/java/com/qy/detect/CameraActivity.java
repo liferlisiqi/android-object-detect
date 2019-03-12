@@ -7,7 +7,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.ImageFormat;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.YuvImage;
@@ -22,11 +24,16 @@ import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
+import android.view.WindowManager.LayoutParams;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.location.Location;
 import android.location.LocationManager;
@@ -44,6 +51,7 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
+import android.util.Base64;
 
 public class CameraActivity extends Activity implements SurfaceHolder.Callback, Camera.PreviewCallback, LocationListener {
 
@@ -78,7 +86,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     // The surface view for the camera data
     private SurfaceView mSurfaceView;
     private OverlayView mOverlayView;
-
 
     //
     private Runnable postInferenceCallback;
@@ -143,13 +150,18 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        requestPermission();
+
         mSurfaceView = new SurfaceView(this);
-        setContentView(mSurfaceView);
+        //setContentView(mSurfaceView);
+
+        WindowManager mWindowManager = (WindowManager)getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
+        LayoutParams params = createWindowParams();
+        mWindowManager.addView(mSurfaceView, params);
 
         Intent keepLiveIntent = new Intent(this, KeepLiveService.class);
         startService(keepLiveIntent);
-
-        requestPermission();
 
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (ActivityCompat.checkSelfPermission(this, PERMISSION_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
@@ -162,7 +174,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         mqttHelper.init();
 
         mOverlayView = new OverlayView(this);
-        addContentView(mOverlayView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        //addContentView(mOverlayView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // Create and Start the OrientationListener:
         mOrientationEventListener = new SimpleOrientationEventListener(this);
@@ -183,8 +195,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
 
         isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
         hasNetwork = Util.isNetworkAvailable(this);
-
-        if (isProcessingFrame || !isDay || !hasNetwork) {
+        // || !isDay
+        if (isProcessingFrame || !hasNetwork) {
             mCamera.addCallbackBuffer(bytes);
             Log.e(TAG, "Dropping frame!");
             return;
@@ -239,14 +251,14 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                     try{
                         if(nv21Bytes == null)
                             nv21Bytes = new byte[yuvCopy.length];
-                        /*Util.YV12toNV21(yuvCopy, nv21Bytes, cameraSize.width, cameraSize.height);
+                        Util.YV12toNV21(yuvCopy, nv21Bytes, cameraSize.width, cameraSize.height);
                         YuvImage yuv = new YuvImage(nv21Bytes, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
                         yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 50, nv21Stream);
                         byte[] nv21CompressBytes = nv21Stream.toByteArray();
                         jsonObject.put("SN", SN);
-                        jsonObject.put("image", new String(nv21CompressBytes, StandardCharsets.UTF_8));
+                        jsonObject.put("image", new String(Base64.decode(nv21CompressBytes, Base64.DEFAULT), StandardCharsets.UTF_8));
                         jsonObject.put("results", resultStr);
-                        jsonObject.put("time", time);*/
+                        jsonObject.put("time", time);
                         jsonObject.put("location", latitude + "_" + longitude);
                     }catch (Exception e) {
                         e.printStackTrace();
@@ -345,6 +357,23 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                 });
     }
 
+    private LayoutParams createWindowParams() {
+        WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams();
+        // 设置为始终顶层
+        layoutParams.type = WindowManager.LayoutParams.TYPE_SYSTEM_ALERT;
+        // 设置弹出的Window不持有焦点
+        layoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+        // 大小
+        layoutParams.width = 100;
+        layoutParams.height = 100;
+        // 位置
+        layoutParams.gravity = Gravity.LEFT | Gravity.TOP;
+        // 设置背景透明
+        layoutParams.format = PixelFormat.TRANSLUCENT;
+        return layoutParams;
+    }
+
+
     @Override
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
@@ -388,12 +417,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     @Override
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
         mCamera = getCameraInstance();
-
+        configureCamera();
+        setDisplayOrientation();
         try {
-            configureCamera();
-            setDisplayOrientation();
             mCamera.setPreviewDisplay(surfaceHolder);
-
             if (cameraBuffer == null) {
                 int bufferSize = Util.getYUVByteSize(cameraSize.height, cameraSize.width);
                 cameraBuffer = new byte[bufferSize];
@@ -401,7 +428,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
 
             mCamera.addCallbackBuffer(cameraBuffer);
             mCamera.setPreviewCallbackWithBuffer(this);
-
             mCamera.startPreview();
         } catch (Exception e) {
             Log.e(TAG, "Could not preview the image.", e);

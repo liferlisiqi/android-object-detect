@@ -187,12 +187,10 @@ public class Util {
     }
 
     /*public static void convertYUV420SPToARGB8888(byte[] input, int width, int height, int[] output){
-        GPUImageNativeLibrary.YUVtoRBGA(input, width, height, output);
+        GPUImageNativeLibrary.YUVtoARBG(input, width, height, output);
     }*/
-
     public static void convertYUV420SPToARGB8888(
             byte[] input, int width, int height, int[] output) {
-
         // Java implementation of YUV420SP to ARGB8888 converting
         final int frameSize = width * height;
         for (int j = 0, yp = 0; j < height; j++) {
