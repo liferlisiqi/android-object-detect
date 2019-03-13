@@ -33,8 +33,6 @@ public class KeepLiveService extends Service {
             startForeground(NOTIFICATION_ID, builder.build());
             startService(new Intent(this, InnerService.class));
         }
-
-
     }
 
     @Override

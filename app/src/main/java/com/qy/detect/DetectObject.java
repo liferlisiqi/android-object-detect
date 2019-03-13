@@ -14,4 +14,7 @@ public class DetectObject {
         this.confidence = confidence;
         this.location = location;
             }
+
+
+
 }

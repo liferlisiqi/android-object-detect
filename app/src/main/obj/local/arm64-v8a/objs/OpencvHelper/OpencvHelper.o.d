@@ -1,5 +1,5 @@
-/home/lsq/AndroidStudioProjects/detect1/app/src/main/obj/local/arm64-v8a/objs/OpencvHelper/OpencvHelper.o: \
-  /home/lsq/AndroidStudioProjects/detect1/app/src/main/jni/OpencvHelper.cpp \
+/home/lsq/AndroidStudioProjects/detect4/app/src/main/obj/local/arm64-v8a/objs/OpencvHelper/OpencvHelper.o: \
+  /home/lsq/AndroidStudioProjects/detect4/app/src/main/jni/OpencvHelper.cpp \
   /home/lsq/softs/OpenCV-android-sdk/sdk/native/jni/include/opencv2/opencv.hpp \
   /home/lsq/softs/OpenCV-android-sdk/sdk/native/jni/include/opencv2/opencv_modules.hpp \
   /home/lsq/softs/OpenCV-android-sdk/sdk/native/jni/include/opencv2/core.hpp \

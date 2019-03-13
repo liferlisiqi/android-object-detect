@@ -96,10 +96,7 @@ public class OverlayView extends View {
         canvas.drawText("longitude:" + mLongitude,300, 90, mTextPaint);
 
         if (!mResults.isEmpty()) {
-            Matrix matrix = new Matrix();
-            Util.prepareMatrix(matrix, false, mDisplayOrientation, getWidth(), getHeight());
             canvas.save();
-            matrix.postRotate(mOrientation);
             RectF rectF = new RectF();
 
             for(int i=0; i<mResults.size(); i++){
@@ -107,7 +104,6 @@ public class OverlayView extends View {
                         mResults.get(i).location.top * canvasHeight,
                         mResults.get(i).location.right * canvasWidth,
                         mResults.get(i).location.bottom * canvasHeight);
-                //matrix.mapRect(rectF);
                 canvas.drawRect(rectF, mPaint);
                 canvas.drawText(mResults.get(i).title + ":" + mResults.get(i).confidence,rectF.left, rectF.top+20, mTextPaint);
             }

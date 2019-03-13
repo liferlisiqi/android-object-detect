@@ -43,7 +43,6 @@ import jp.co.cyberagent.android.gpuimage.filter.GPUImageLaplacianFilter;
 public class Util {
 
     private static final String TAG = "Util";
-
     static final int kMaxChannelValue = 262143;
     // Orientation hysteresis amount used in rounding, in degrees
     private static final int ORIENTATION_HYSTERESIS = 5;
@@ -87,18 +86,6 @@ public class Util {
         return result;
     }
 
-    public static void prepareMatrix(Matrix matrix, boolean mirror, int displayOrientation,
-                                     int viewWidth, int viewHeight) {
-        // Need mirror for front camera.
-        matrix.setScale(mirror ? -1 : 1, 1);
-        // This is the value for android.hardware.Camera.setDisplayOrientation.
-        matrix.postRotate(displayOrientation);
-        // Camera driver coordinates range from (-1000, -1000) to (1000, 1000).
-        // UI coordinates range from (0, 0) to (width, height).
-        matrix.postScale(viewWidth / 2000f, viewHeight / 2000f);
-        matrix.postTranslate(viewWidth / 2f, viewHeight / 2f);
-    }
-
     public static int roundOrientation(int orientation, int orientationHistory) {
         boolean changeOrientation = false;
         if (orientationHistory == OrientationEventListener.ORIENTATION_UNKNOWN) {
@@ -123,6 +110,13 @@ public class Util {
         }
     }
 
+    /**
+     *
+     * @param choices 相机支持的分辨率
+     * @param width 理想的分辨率宽
+     * @param height 和高
+     * @return
+     */
     protected static Size chooseOptimalSize(final List<Size> choices, final int width, final int height) {
         final int minSize = Math.max(Math.min(width, height), MINIMUM_PREVIEW_SIZE);
         final Size desiredSize = choices.get(0);
@@ -166,6 +160,12 @@ public class Util {
         }
     }
 
+    /**
+     * 计算yuv数据的内存大小
+     * @param width 图像分辨率
+     * @param height ～
+     * @return
+     */
     public static int getYUVByteSize(final int width, final int height) {
         // The luminance plane requires 1 byte per pixel.
         final int ySize = width * height;
@@ -177,6 +177,13 @@ public class Util {
         return ySize + uvSize;
     }
 
+    /**
+     * 从yuv中提取y通道
+     * @param input
+     * @param width
+     * @param height
+     * @param output
+     */
     public static void convertYUV420SPToY888(byte[] input, int width, int height, int[] output){
         int p;
         int size = width*height;
@@ -186,9 +193,24 @@ public class Util {
         }
     }
 
-    /*public static void convertYUV420SPToARGB8888(byte[] input, int width, int height, int[] output){
+    /**
+     * 使用OpenCL开源库转换NV21到ARGB
+     * @param input
+     * @param width
+     * @param height
+     * @param output
+     */
+    public static void convertYUV420SPToARGB8888CL(byte[] input, int width, int height, int[] output){
         GPUImageNativeLibrary.YUVtoARBG(input, width, height, output);
-    }*/
+    }
+
+    /**
+     * 手动转换NV21到ARGB
+     * @param input
+     * @param width
+     * @param height
+     * @param output
+     */
     public static void convertYUV420SPToARGB8888(
             byte[] input, int width, int height, int[] output) {
         // Java implementation of YUV420SP to ARGB8888 converting
@@ -209,6 +231,13 @@ public class Util {
         }
     }
 
+    /**
+     * 单个像素的转换
+     * @param y
+     * @param u
+     * @param v
+     * @return
+     */
     private static int YUV2RGB(int y, int u, int v) {
         // Adjust and check YUV values
         y = (y - 16) < 0 ? 0 : (y - 16);
@@ -233,6 +262,13 @@ public class Util {
         return 0xff000000 | ((r << 6) & 0xff0000) | ((g >> 2) & 0xff00) | ((b >> 10) & 0xff);
     }
 
+    /**
+     * 第二种NV21转换ARGB的代码
+     * @param data
+     * @param width
+     * @param height
+     * @param pixels
+     */
     public static void convertYUV420_NV21toRGB8888(byte [] data, int width, int height, int[] pixels) {
         int size = width*height;
         int offset = size;
@@ -268,36 +304,6 @@ public class Util {
         }
     }
 
-    public static void convertYUV420_YV12toRGB8888(byte [] data, int width, int height, int[] pixels) {
-        int size = width*height;
-        int offset = size;
-        //int[] pixels = new int[size];s
-        int u, v, y1, y2, y3, y4;
-
-        // i percorre os Y and the final pixels
-        // k percorre os pixles U e V
-        for(int i=0, k=0; i < size; i+=2, k++) {
-            y1 = data[i  ]&0xff;
-            y2 = data[i+1]&0xff;
-            y3 = data[width+i  ]&0xff;
-            y4 = data[width+i+1]&0xff;
-
-            u = data[offset+k+size/4]&0xff;
-            v = data[offset+k]&0xff;
-
-            u = u-128;
-            v = v-128;
-
-            pixels[i  ] = convertYUVtoRGB(y1, u, v);
-            pixels[i+1] = convertYUVtoRGB(y2, u, v);
-            pixels[width+i  ] = convertYUVtoRGB(y3, u, v);
-            pixels[width+i+1] = convertYUVtoRGB(y4, u, v);
-
-            if (i!=0 && (i+2)%width==0)
-                i+=width;
-        }
-    }
-
     private static int convertYUVtoRGB(int y, int u, int v) {
         int r,g,b;
         r = y + (int)(1.402f*v);
@@ -309,6 +315,13 @@ public class Util {
         return 0xff000000 | (b<<16) | (g<<8) | r;
     }
 
+    /**
+     * 后视镜相机设定图像数据格式为YV12，需要用下面的代码转换成NV21
+     * @param input
+     * @param output
+     * @param width
+     * @param height
+     */
     public static void YV12toNV21(final byte[] input, final byte[] output, final int width, final int height) {
         final int frameSize = width * height;
         final int qFrameSize = frameSize / 4;
@@ -320,9 +333,12 @@ public class Util {
         }
     }
 
+    /**
+     * 获取小时以判断是否白天
+     * @return
+     */
     public static int getHour(){
         long tTime = System.currentTimeMillis();
-
         mCalendar.setTimeInMillis(tTime);
         return mCalendar.get(Calendar.HOUR_OF_DAY);
     }
@@ -332,7 +348,11 @@ public class Util {
         return formatter.format(date);
     }
 
-
+    /**
+     * 是否有网
+     * @param context
+     * @return
+     */
     public static boolean isNetworkAvailable(Context context) {
 
         ConnectivityManager manager = (ConnectivityManager) context

@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
-import android.graphics.Color;
 import android.graphics.ImageFormat;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
@@ -15,7 +14,9 @@ import android.graphics.RectF;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.hardware.SensorManager;
+import android.location.Location;
 import android.location.LocationListener;
+import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -24,20 +25,16 @@ import android.os.HandlerThread;
 import android.os.MemoryFile;
 import android.os.SystemClock;
 import android.support.v4.app.ActivityCompat;
+import android.util.Base64;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.OrientationEventListener;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.view.WindowManager;
 import android.view.WindowManager.LayoutParams;
-import android.widget.TextView;
 import android.widget.Toast;
-import android.location.Location;
-import android.location.LocationManager;
 
 import org.json.JSONObject;
 
@@ -52,8 +49,9 @@ import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
-import android.util.Base64;
 
+//alarm
+//
 public class CameraActivity extends Activity implements SurfaceHolder.Callback, Camera.PreviewCallback, LocationListener {
 
     public static final String TAG = CameraActivity.class.getSimpleName();
@@ -129,6 +127,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private String time;
     private double latitude;
     private double longitude;
+    private double speed;
     private JSONObject jsonObject = new JSONObject();
     byte[] nv21Bytes;
     byte[] nv21CompressBytes;
@@ -151,18 +150,27 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private MemoryFile mMemoryFile;
     BufferBean mBufferBean;
 
+    /**
+     * app初始化
+     * @param savedInstanceState
+     */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         requestPermission();
 
+        //显示摄像头捕获到的图像
         mSurfaceView = new SurfaceView(this);
-        //setContentView(mSurfaceView);
+        setContentView(mSurfaceView);
+        //显示检测结果
+        mOverlayView = new OverlayView(this);
+        addContentView(mOverlayView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        WindowManager mWindowManager = (WindowManager)getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
+        //悬浮窗
+        /*WindowManager mWindowManager = (WindowManager)getApplicationContext().getSystemService(Context.WINDOW_SERVICE);
         LayoutParams params = createWindowParams();
-        mWindowManager.addView(mSurfaceView, params);
+        mWindowManager.addView(mSurfaceView, params);*/
 
         Intent keepLiveIntent = new Intent(this, KeepLiveService.class);
         startService(keepLiveIntent);
@@ -177,9 +185,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         mqttHelper = new MqttHelper();
         mqttHelper.init();
 
-        mOverlayView = new OverlayView(this);
-        //addContentView(mOverlayView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
         // Create and Start the OrientationListener:
         mOrientationEventListener = new SimpleOrientationEventListener(this);
         mOrientationEventListener.enable();
@@ -192,21 +197,15 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    /**
+     * 相机回调函数
+     * @param bytes 实时帧数据，YV12格式
+     * @param camera 相机实例
+     */
     @Override
     public void onPreviewFrame(final byte[] bytes, final Camera camera) {
         // 后视镜的摄像头捕获图像尺寸未找到手动调整的办法，只能使用默认分辨率1080*1920，
         // 所以bytes大小为1080*1920*1.5，解析的时候必须按照该尺寸
-
-        writeMemoryByte( bytes);
-
-        isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
-        hasNetwork = Util.isNetworkAvailable(this);
-        // || !isDay
-        if (isProcessingFrame || !hasNetwork) {
-            mCamera.addCallbackBuffer(bytes);
-            Log.e(TAG, "Dropping frame!");
-            return;
-        }
 
         try {
             if (yBytes == null) {
@@ -220,8 +219,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             Log.e(TAG, "Exception!");
             return;
         }
-
-        isProcessingFrame = true;
 
         converteImage = new Runnable() {
             @Override
@@ -238,6 +235,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             public void run() {
                 long startTime = SystemClock.uptimeMillis();
                 boolean isUseful = judgeImage();
+                //模糊检测，有效帧存入buffer
                 lapTime = SystemClock.uptimeMillis() - startTime;
                 if (yBuffer.remainingCapacity() > 0 && isUseful) {
                     try {
@@ -254,21 +252,24 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             @Override
             public void run() {
                 if(hasNetwork){
+                    if(nv21Bytes == null)
+                        nv21Bytes = new byte[yuvCopy.length];
+                    Util.YV12toNV21(yuvCopy, nv21Bytes, cameraSize.width, cameraSize.height);
+                    YuvImage yuv = new YuvImage(nv21Bytes, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
+                    yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 50, nv21Stream);
+                    byte[] nv21CompressBytes = nv21Stream.toByteArray();
                     try{
-                        if(nv21Bytes == null)
-                            nv21Bytes = new byte[yuvCopy.length];
-                        Util.YV12toNV21(yuvCopy, nv21Bytes, cameraSize.width, cameraSize.height);
-                        YuvImage yuv = new YuvImage(nv21Bytes, ImageFormat.NV21, cameraSize.width, cameraSize.height, null);
-                        yuv.compressToJpeg(new Rect(0, 0,cameraSize.width, cameraSize.height), 50, nv21Stream);
-                        byte[] nv21CompressBytes = nv21Stream.toByteArray();
                         jsonObject.put("SN", SN);
                         jsonObject.put("image", new String(Base64.decode(nv21CompressBytes, Base64.DEFAULT), StandardCharsets.UTF_8));
                         jsonObject.put("person", hasPerson + "");
                         jsonObject.put("car", hasCar + "");
                         jsonObject.put("time", time);
                         jsonObject.put("location", latitude + "_" + longitude);
+                        jsonObject.put("speed", speed+"");
                     }catch (Exception e) {
                         e.printStackTrace();
+                        // nullptr problem
+                        Log.d(TAG, "run:");
                     }
                     String jsonStr = jsonObject.toString();
                     mqttHelper.publish(jsonStr, false, 2);
@@ -284,9 +285,27 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             }
         };
 
+        isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
+        hasNetwork = Util.isNetworkAvailable(this);
+        //buffer ? 2
+        //putImage.run();
+        convertImage();
+
+        // || !isDay
+        if (isProcessingFrame || !isDay || !hasNetwork) {
+            mCamera.addCallbackBuffer(bytes);
+            Log.e(TAG, "Dropping frame!");
+            return;
+        }
+
+        isProcessingFrame = true;
+
         processImage();
     }
 
+    /**
+     * 检测车辆和行人
+     */
     protected void processImage() {
         readyForNextImage();
 
@@ -297,7 +316,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
         isComputingDetection = true;
 
-        convertImage();
+        //convertImage();
 
         if (!yBuffer.isEmpty()) {
             try {
@@ -310,6 +329,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
             return;
         }
 
+        //
         originBitmap.setPixels(yCopy, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
         croppedBitmap = Bitmap.createScaledBitmap(originBitmap, 227, 227, false);
 
@@ -318,6 +338,7 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                     @Override
                     public void run() {
                         detectStartTime = SystemClock.uptimeMillis();
+                        //检测行人和车辆，
                         results = mobileNetssd.Detect(croppedBitmap);
                         detectTime = SystemClock.uptimeMillis() - detectStartTime;
                         time = Util.getTime();
@@ -360,25 +381,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                 });
     }
 
-    public int writeMemoryByte(byte[] frame){
-        try {
-            if (mMemoryFile != null) {
-                mMemoryFile.readBytes(mBufferBean.isCanRead, 0, 0, 1);
-                if (mBufferBean.isCanRead[0] == 0) {    //写
-                    mMemoryFile.writeBytes(frame, 0, 1, mBufferBean.mBuffer.length);
-
-                    mBufferBean.isCanRead[0] = 1;   //可读
-                    mMemoryFile.writeBytes(mBufferBean.isCanRead, 0, 0, 1);
-                }
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return -1;
-        }
-        return 0;
-    }
-
-    //floating window
+    /**
+     * 悬浮窗代码，与onCreate()中的WindowManager对应
+     * @return
+     */
     private LayoutParams createWindowParams() {
         WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams();
         // 设置为始终顶层
@@ -395,7 +401,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         return layoutParams;
     }
 
-
+    /**
+     * 在mSurfaceView预览相机数据设定
+     * @param savedInstanceState
+     */
     @Override
     protected void onPostCreate(Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
@@ -403,6 +412,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         holder.addCallback(this);
     }
 
+    /**
+     * app生命周期之一
+     */
     @Override
     protected synchronized void onResume() {
         super.onResume();
@@ -412,6 +424,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         handler = new Handler(handlerThread.getLooper());
     }
 
+    /**
+     * app生命周期之一
+     */
     @Override
     protected synchronized void onPause() {
         mOrientationEventListener.disable();
@@ -426,6 +441,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         super.onPause();
     }
 
+    /**
+     * 获取相机实例
+     * @return
+     */
     private static Camera getCameraInstance() {
         Camera camera = null;
         try {
@@ -436,6 +455,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         return camera;
     }
 
+    /**
+     * 预览surfaceholder初始化及相机初始化，对应SurfaceHolder.Callback
+     * @param surfaceHolder
+     */
     @Override
     public void surfaceCreated(SurfaceHolder surfaceHolder) {
         mCamera = getCameraInstance();
@@ -454,8 +477,17 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         } catch (Exception e) {
             Log.e(TAG, "Could not preview the image.", e);
         }
+
+
     }
 
+    /**
+     * 对应SurfaceHolder.Callback
+     * @param surfaceHolder
+     * @param format
+     * @param width
+     * @param height
+     */
     @Override
     public void surfaceChanged(SurfaceHolder surfaceHolder, int format, int width, int height) {
         if (surfaceHolder.getSurface() == null) {
@@ -464,21 +496,22 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         // Try to stop the current preview:
         try {
             mCamera.stopPreview();
-
             if (cameraBuffer == null) {
                 int bufferSize = Util.getYUVByteSize(cameraSize.height, cameraSize.width);
                 cameraBuffer = new byte[bufferSize];
             }
-
             mCamera.addCallbackBuffer(cameraBuffer);
             mCamera.setPreviewCallbackWithBuffer(this);
-
             mCamera.startPreview();
         } catch (Exception e) {
             Log.e(TAG, "Could not preview the image.", e);
         }
     }
 
+    /**
+     * 预览结束，释放camera
+     * @param surfaceHolder
+     */
     @Override
     public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
         mCamera.setPreviewCallback(null);
@@ -487,29 +520,33 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         mCamera = null;
     }
 
+    /**
+     * 相机预览方向设定
+     */
     private void setDisplayOrientation() {
         // Now set the display orientation:
         mDisplayRotation = Util.getDisplayRotation(CameraActivity.this);
         mDisplayOrientation = Util.getDisplayOrientation(mDisplayRotation, 0);
 
         mCamera.setDisplayOrientation(mDisplayOrientation);
-
-        if (mOverlayView != null) {
-            //mOverlayView.setDisplayOrientation(mDisplayOrientation);
-            mOverlayView.setDisplayOrientation(90);
-        }
     }
 
+    /**
+     * 相机初始化设定
+     */
     private void configureCamera() {
         Camera.Parameters parameters = mCamera.getParameters();
         List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
         cameraSize = Util.chooseOptimalSize(previewSizes, DESIRED_PREVIEW_WIDTH, DESIRED_PREVIEW_HEIGHT);
         parameters.setPreviewSize(cameraSize.width, cameraSize.height);
         parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
-        parameters.setPreviewFormat(ImageFormat.NV21);
+        //parameters.setPreviewFormat(ImageFormat.NV21);
         mCamera.setParameters(parameters);
     }
 
+    /**
+     * 方向变换代码，可以不看
+     */
     private class SimpleOrientationEventListener extends OrientationEventListener {
 
         public SimpleOrientationEventListener(Context context) {
@@ -534,6 +571,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    /**
+     * 申请权限
+     */
     private void requestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (shouldShowRequestPermissionRationale(PERMISSION_CAMERA) ||
@@ -547,6 +587,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    /**
+     * 加载mobilenetSSD模型
+     * @throws IOException
+     */
     private void loadMobileSSD() throws IOException {
         byte[] param = null;
         byte[] bin = null;
@@ -577,6 +621,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         mobileNetssd.Init(param, bin, words);
     }
 
+    /**
+     * 加载 label
+     */
     private void loadLabel() {
         try {
             AssetManager assetManager = getApplicationContext().getAssets();
@@ -591,17 +638,26 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    /**
+     * yuv提取y通道，buffer填充
+     */
     protected void convertImage() {
         converteImage.run();
         putImage.run();
     }
 
+    /**
+     * camera帧更新
+     */
     protected void readyForNextImage() {
         if (postInferenceCallback != null) {
             postInferenceCallback.run();
         }
     }
 
+    /**
+     * json上传至服务器
+     */
     protected void postResults(){
         resultPoster.run();
     }
@@ -612,6 +668,10 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         }
     }
 
+    /**
+     * 图像模糊程度检测
+     * @return
+     */
     protected boolean judgeImage() {
         Bitmap grayBmp = Bitmap.createBitmap(cameraSize.width, cameraSize.height, Bitmap.Config.ARGB_8888);
         grayBmp.setPixels(yBytes, 0, cameraSize.width, 0, 0, cameraSize.width, cameraSize.height);
@@ -619,10 +679,15 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
         return blurSTD > BlUR_THRESHHOLD;
     }
 
+    /**
+     * gps获取位置和速度
+     * @param location
+     */
     @Override
     public void onLocationChanged(Location location) {
         latitude = location.getLatitude();
         longitude = location.getLongitude();
+        speed = location.getSpeed();
     }
 
     @Override
