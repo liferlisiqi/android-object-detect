@@ -1,4 +1,4 @@
-package com.calmcar.adas;
+package com.qy.detect;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
@@ -10,9 +10,8 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.view.ViewGroup;
 
-import com.calmcar.adas.apiserver.model.BufferBean;
-import com.calmcar.adas.apiserver.model.JavaCameraFrame;
-
+import org.opencv.android.CameraBridgeViewBase;
+import org.opencv.android.JavaCameraView;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
@@ -34,7 +33,7 @@ public class JavaCameraView2 extends CameraBridgeViewBase implements Camera.Prev
     private boolean mStopThread;
 
     protected Camera mCamera;
-    protected JavaCameraFrame[] mCameraFrame;
+    protected JavaCameraView.JavaCameraFrame[] mCameraFrame;
     private SurfaceTexture mSurfaceTexture;
 
 
