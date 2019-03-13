@@ -21,6 +21,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.MemoryFile;
 import android.os.SystemClock;
 import android.support.v4.app.ActivityCompat;
 import android.util.Log;
@@ -119,12 +120,12 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private boolean isComputingDetection = false;
     private boolean isDay;
     private boolean hasNetwork;
-    private boolean hasCarOrPerson;
 
     // json
     private String SN = android.os.Build.SERIAL;
     private byte[] yuvCopy = null;
-    private String resultStr = "";
+    private int hasPerson = 0;
+    private int hasCar = 0;
     private String time;
     private double latitude;
     private double longitude;
@@ -146,6 +147,9 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     private int[] rgb;
     private String path = Environment.getExternalStorageDirectory().toString();
     private File file;
+
+    private MemoryFile mMemoryFile;
+    BufferBean mBufferBean;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -192,6 +196,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
     public void onPreviewFrame(final byte[] bytes, final Camera camera) {
         // 后视镜的摄像头捕获图像尺寸未找到手动调整的办法，只能使用默认分辨率1080*1920，
         // 所以bytes大小为1080*1920*1.5，解析的时候必须按照该尺寸
+
+        writeMemoryByte( bytes);
 
         isDay = Util.getHour() >= START_HOUR && Util.getHour() <= END_HOUR;
         hasNetwork = Util.isNetworkAvailable(this);
@@ -257,7 +263,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                         byte[] nv21CompressBytes = nv21Stream.toByteArray();
                         jsonObject.put("SN", SN);
                         jsonObject.put("image", new String(Base64.decode(nv21CompressBytes, Base64.DEFAULT), StandardCharsets.UTF_8));
-                        jsonObject.put("results", resultStr);
+                        jsonObject.put("person", hasPerson + "");
+                        jsonObject.put("car", hasCar + "");
                         jsonObject.put("time", time);
                         jsonObject.put("location", latitude + "_" + longitude);
                     }catch (Exception e) {
@@ -315,8 +322,8 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                         detectTime = SystemClock.uptimeMillis() - detectStartTime;
                         time = Util.getTime();
                         objects.clear();
-                        hasCarOrPerson = false;
-                        resultStr = "";
+                        hasPerson = 0;
+                        hasCar = 0;
 
                         for (int i = 0; i < results.length / 6; i++) {
                             if (results[i * 6 + 1] < minimumConfidence)
@@ -327,7 +334,6 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                             }
                             int ID = (int) results[i * 6];
                             if (ID == 7 || ID == 15) { //car or person
-                                hasCarOrPerson = true;
                                 String title = synset_words.get((int) results[i * 6]);
                                 Float confidence = results[i * 6 + 1];
                                 RectF location = new RectF(results[i * 6 + 2],
@@ -335,21 +341,18 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                                         results[i * 6 + 4],
                                         results[i * 6 + 5]);
                                 objects.add(new DetectObject(ID + "", title, confidence, location));
-                                resultStr += "[" + ID / 7 + "," + results[i * 6 + 2] + "," +
-                                        results[i * 6 + 3] + "," +
-                                        results[i * 6 + 4] + "," +
-                                        results[i * 6 + 5] + "]";
+                                if(ID == 7) hasCar = 1;
+                                if(ID == 15) hasPerson = 1;
                             }
                         }
 
-                        if(hasCarOrPerson){
+                        if(hasPerson == 1 || hasCar == 1){
                             //resultPoster.run();
-                            Log.d(TAG, resultStr);
+                            Log.d(TAG, hasPerson + " " + hasCar);
                         }
 
                         int remain = yBuffer.remainingCapacity();
-                        mOverlayView.drawResults(objects, detectTime, remain, blurSTD,
-                                convertTime, lapTime,
+                        mOverlayView.drawResults(objects, detectTime, remain, blurSTD, convertTime, lapTime,
                                 gpsFormat.format(latitude), gpsFormat.format(longitude));
                         mOverlayView.postInvalidate();
                         isComputingDetection = false;
@@ -357,6 +360,25 @@ public class CameraActivity extends Activity implements SurfaceHolder.Callback, 
                 });
     }
 
+    public int writeMemoryByte(byte[] frame){
+        try {
+            if (mMemoryFile != null) {
+                mMemoryFile.readBytes(mBufferBean.isCanRead, 0, 0, 1);
+                if (mBufferBean.isCanRead[0] == 0) {    //写
+                    mMemoryFile.writeBytes(frame, 0, 1, mBufferBean.mBuffer.length);
+
+                    mBufferBean.isCanRead[0] = 1;   //可读
+                    mMemoryFile.writeBytes(mBufferBean.isCanRead, 0, 0, 1);
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return -1;
+        }
+        return 0;
+    }
+
+    //floating window
     private LayoutParams createWindowParams() {
         WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams();
         // 设置为始终顶层
